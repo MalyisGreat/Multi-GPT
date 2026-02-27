@@ -12,3 +12,4 @@ sacrebleu
 nltk
 rouge-score
 absl-py
+gradio

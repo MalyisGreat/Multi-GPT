@@ -214,3 +214,17 @@ Core metrics:
 - `exact_match`
 - `label_keyword_accuracy`
 - `image_swap_sensitivity`
+
+## Image Chat UI
+
+Launch a local chat UI using an exported checkpoint archive:
+
+```powershell
+python src/chat_multimodal.py `
+  --checkpoint-archive "C:\Users\joshj\Downloads\unified-cifar100-long-best.tar.gz" `
+  --extract-root "." `
+  --host 127.0.0.1 `
+  --port 7860
+```
+
+Then open `http://127.0.0.1:7860`, upload an image, and ask a question.
