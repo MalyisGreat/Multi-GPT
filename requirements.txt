@@ -1,0 +1,14 @@
+transformers>=4.40.0
+datasets>=2.18.0
+accelerate>=0.28.0
+tokenizers
+sentencepiece
+Pillow
+tqdm
+numpy
+pandas
+evaluate
+sacrebleu
+nltk
+rouge-score
+absl-py
