@@ -1,16 +1,197 @@
 from __future__ import annotations
 
 import argparse
+import collections
 import inspect
 import json
 import re
 import tarfile
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import torch
 from PIL import Image
+
+
+CIFAR10_LABELS = [
+    "airplane",
+    "automobile",
+    "bird",
+    "cat",
+    "deer",
+    "dog",
+    "frog",
+    "horse",
+    "ship",
+    "truck",
+]
+
+CIFAR100_LABELS = [
+    "apple",
+    "aquarium_fish",
+    "baby",
+    "bear",
+    "beaver",
+    "bed",
+    "bee",
+    "beetle",
+    "bicycle",
+    "bottle",
+    "bowl",
+    "boy",
+    "bridge",
+    "bus",
+    "butterfly",
+    "camel",
+    "can",
+    "castle",
+    "caterpillar",
+    "cattle",
+    "chair",
+    "chimpanzee",
+    "clock",
+    "cloud",
+    "cockroach",
+    "couch",
+    "crab",
+    "crocodile",
+    "cup",
+    "dinosaur",
+    "dolphin",
+    "elephant",
+    "flatfish",
+    "forest",
+    "fox",
+    "girl",
+    "hamster",
+    "house",
+    "kangaroo",
+    "computer_keyboard",
+    "lamp",
+    "lawn_mower",
+    "leopard",
+    "lion",
+    "lizard",
+    "lobster",
+    "man",
+    "maple_tree",
+    "motorcycle",
+    "mountain",
+    "mouse",
+    "mushroom",
+    "oak_tree",
+    "orange",
+    "orchid",
+    "otter",
+    "palm_tree",
+    "pear",
+    "pickup_truck",
+    "pine_tree",
+    "plain",
+    "plate",
+    "poppy",
+    "porcupine",
+    "possum",
+    "rabbit",
+    "raccoon",
+    "ray",
+    "road",
+    "rocket",
+    "rose",
+    "sea",
+    "seal",
+    "shark",
+    "shrew",
+    "skunk",
+    "skyscraper",
+    "snail",
+    "snake",
+    "spider",
+    "squirrel",
+    "streetcar",
+    "sunflower",
+    "sweet_pepper",
+    "table",
+    "tank",
+    "telephone",
+    "television",
+    "tiger",
+    "tractor",
+    "train",
+    "trout",
+    "tulip",
+    "turtle",
+    "wardrobe",
+    "whale",
+    "willow_tree",
+    "wolf",
+    "woman",
+    "worm",
+]
+
+# Kept intentionally small and conservative for this checkpoint.
+EDIBLE_LABELS = {
+    "apple",
+    "orange",
+    "pear",
+    "sweet_pepper",
+    "mushroom",
+}
+
+NON_FOOD_HINT_LABELS = {
+    "airplane",
+    "rocket",
+    "truck",
+    "automobile",
+    "bicycle",
+    "ship",
+    "train",
+    "bus",
+    "tank",
+}
+
+
+def _normalize_text(text: str) -> str:
+    text = text.lower().replace("_", " ")
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _normalize_label_key(label: str) -> str:
+    return _normalize_text(label).replace(" ", "_")
+
+
+def _humanize_label(label: str) -> str:
+    return label.replace("_", " ")
+
+
+def _indefinite_article(phrase: str) -> str:
+    return "an" if phrase[:1].lower() in {"a", "e", "i", "o", "u"} else "a"
+
+
+def _dedupe_sentence_chunks(text: str) -> str:
+    chunks = [c.strip() for c in re.split(r"[.!?]+", text) if c.strip()]
+    deduped: List[str] = []
+    seen: Set[str] = set()
+    for chunk in chunks:
+        key = _normalize_text(chunk)
+        if key and key not in seen:
+            deduped.append(chunk)
+            seen.add(key)
+    return ". ".join(deduped).strip()
+
+
+def _detect_intent(question: str) -> str:
+    q = question.lower().strip()
+    if re.search(r"\b(eat|edible|food|safe to eat|can i eat|could i eat)\b", q):
+        return "edibility"
+    if re.search(r"\b(what is this|what's this|what is in this|identify|name this)\b", q):
+        return "identify"
+    if re.search(r"\b(describe|caption)\b", q):
+        return "describe"
+    return "general"
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -171,6 +352,7 @@ class MultimodalChatModel:
         run_config = {}
         if run_config_path.exists():
             run_config = json.loads(run_config_path.read_text(encoding="utf-8"))
+        self.run_config = run_config
 
         vision_model_name = run_config.get("vision_model_name", "openai/clip-vit-base-patch32")
         lm_model_name = run_config.get("lm_model_name", "gpt2")
@@ -209,16 +391,85 @@ class MultimodalChatModel:
         self.model.lm.config.pad_token_id = self.tokenizer.pad_token_id
         self.model.lm.generation_config.pad_token_id = self.tokenizer.pad_token_id
         self.model.eval()
+        self.label_vocab = self._load_label_vocab()
+        self.label_aliases = self._build_label_aliases(self.label_vocab)
 
-    def answer(self, image: Image.Image, question: str) -> str:
-        if image is None:
-            return "Please upload an image."
+    def _build_label_aliases(self, labels: Sequence[str]) -> Dict[str, str]:
+        aliases: Dict[str, str] = {}
+        for label in labels:
+            canonical = _normalize_label_key(label)
+            if canonical:
+                aliases[_normalize_text(label)] = canonical
+                aliases[_normalize_text(_humanize_label(label))] = canonical
+        return aliases
 
-        prompt = question.strip()
-        if not prompt:
-            prompt = "Describe this image."
-        prompt = f"Question: {prompt}\nAnswer:"
+    def _load_label_vocab(self) -> List[str]:
+        labels: Set[str] = set()
+        manifest_candidates = []
+        for key in ("train_jsonl", "val_jsonl", "heldout_jsonl"):
+            value = self.run_config.get(key)
+            if isinstance(value, str) and value.strip():
+                manifest_candidates.append(value.strip())
 
+        for manifest_str in manifest_candidates:
+            manifest_path = Path(manifest_str)
+            if not manifest_path.is_absolute():
+                manifest_path = (Path.cwd() / manifest_path).resolve()
+            if not manifest_path.exists():
+                continue
+
+            summary_path = manifest_path.parent / "dataset_summary.json"
+            if summary_path.exists():
+                try:
+                    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+                    class_names = summary.get("class_names")
+                    if isinstance(class_names, list):
+                        for name in class_names:
+                            if isinstance(name, str) and name.strip():
+                                labels.add(_normalize_label_key(name))
+                except Exception:
+                    pass
+
+            try:
+                with manifest_path.open("r", encoding="utf-8") as f:
+                    for line_idx, line in enumerate(f):
+                        if line_idx >= 50000:
+                            break
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            record = json.loads(line)
+                        except Exception:
+                            continue
+                        label_value = record.get("label")
+                        if isinstance(label_value, str) and label_value.strip():
+                            labels.add(_normalize_label_key(label_value))
+            except Exception:
+                continue
+
+        if labels:
+            return sorted(labels)
+
+        # Fallback when manifests are not present locally.
+        fallback_key = " ".join(
+            [
+                str(self.run_config.get("train_jsonl", "")),
+                str(self.run_config.get("val_jsonl", "")),
+                str(self.run_config.get("heldout_jsonl", "")),
+                str(self.checkpoint_dir),
+            ]
+        ).lower()
+        if "cifar100" in fallback_key:
+            return sorted({_normalize_label_key(x) for x in CIFAR100_LABELS})
+        return sorted({_normalize_label_key(x) for x in CIFAR10_LABELS})
+
+    def _generate_raw(
+        self,
+        image: Image.Image,
+        prompt: str,
+        max_new_tokens: int,
+    ) -> str:
         text_inputs = self.tokenizer(prompt, return_tensors="pt", add_special_tokens=False)
         input_ids = text_inputs["input_ids"].to(self.device)
         if input_ids.shape[1] == 0:
@@ -237,7 +488,7 @@ class MultimodalChatModel:
                 pixel_values=pixel_values,
                 input_ids=input_ids,
                 attention_mask=attention_mask,
-                max_new_tokens=self.max_new_tokens,
+                max_new_tokens=max_new_tokens,
                 num_beams=self.num_beams,
                 do_sample=False,
                 pad_token_id=self.tokenizer.pad_token_id,
@@ -247,7 +498,101 @@ class MultimodalChatModel:
         decoded = self.tokenizer.decode(generated_new[0], skip_special_tokens=True).strip()
         if not decoded:
             decoded = self.tokenizer.decode(generated[0], skip_special_tokens=True).strip()
-        return decoded or "(no output)"
+        return _dedupe_sentence_chunks(decoded) or "(no output)"
+
+    def _extract_label_from_text(self, text: str) -> Optional[str]:
+        normalized = _normalize_text(text)
+        if not normalized:
+            return None
+
+        hits: List[Tuple[int, int, str]] = []
+        for alias, canonical in self.label_aliases.items():
+            start = normalized.find(alias)
+            if start >= 0:
+                hits.append((start, len(alias), canonical))
+        if hits:
+            hits.sort(key=lambda x: (x[0], -x[1]))
+            return hits[0][2]
+
+        # Fallback heuristics when text is noisy/repetitive.
+        fallback_patterns = [
+            r"(?:photo|image|picture)\s+of\s+(?:a|an|the)?\s*([a-z][a-z\s_]{1,40})",
+            r"^(?:a|an|the)\s+([a-z][a-z\s_]{1,40})",
+        ]
+        for pattern in fallback_patterns:
+            match = re.search(pattern, normalized)
+            if match:
+                chunk = match.group(1).strip()
+                chunk = re.sub(r"\b(in|on|at)\b.*$", "", chunk).strip()
+                chunk = chunk.replace(" ", "_")
+                if chunk:
+                    return chunk
+
+        return None
+
+    def _predict_label(self, image: Image.Image) -> Tuple[Optional[str], str]:
+        prompts = [
+            "Question: what is in this image?\nAnswer:",
+            "Question: identify the main object with a short label.\nAnswer:",
+        ]
+        labels: List[str] = []
+        raw_outputs: List[str] = []
+
+        for prompt in prompts:
+            raw = self._generate_raw(image=image, prompt=prompt, max_new_tokens=16)
+            raw_outputs.append(raw)
+            label = self._extract_label_from_text(raw)
+            if label:
+                labels.append(label)
+
+        if labels:
+            best_label = collections.Counter(labels).most_common(1)[0][0]
+            return best_label, raw_outputs[0]
+        return None, raw_outputs[0] if raw_outputs else ""
+
+    def answer(self, image: Image.Image, question: str) -> str:
+        if image is None:
+            return "Please upload an image."
+
+        question_clean = question.strip() or "What is this image?"
+        intent = _detect_intent(question_clean)
+
+        label, raw_caption = self._predict_label(image=image)
+        if label:
+            human_label = _humanize_label(label)
+            article = _indefinite_article(human_label)
+        else:
+            human_label = ""
+            article = "a"
+
+        if intent == "identify":
+            if label:
+                return f"It looks like {article} {human_label}."
+            return f"I am not confident on the object. Model output: {raw_caption}"
+
+        if intent == "describe":
+            if label:
+                return f"This appears to be {article} {human_label}."
+            return raw_caption
+
+        if intent == "edibility":
+            if not label:
+                return "I cannot determine the object confidently, so I cannot answer edibility."
+            if label in EDIBLE_LABELS:
+                return (
+                    f"It looks like {article} {human_label}. "
+                    f"That is generally edible, but this model cannot verify preparation or safety."
+                )
+            if label in NON_FOOD_HINT_LABELS:
+                return f"It looks like {article} {human_label}. That is not food."
+            return f"It looks like {article} {human_label}. This model is not reliable for safety/edibility decisions."
+
+        if label:
+            return (
+                f"It looks like {article} {human_label}. "
+                "This checkpoint is tuned for object identification and short captions."
+            )
+        return raw_caption
 
 
 def run_ui(
