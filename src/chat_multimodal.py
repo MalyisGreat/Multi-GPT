@@ -11,9 +11,6 @@ from typing import List, Optional, Tuple
 import torch
 from PIL import Image
 
-from models.native_vision_gpt2 import NativeVisionGPT2, load_processors
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Chat with a multimodal GPT-2 checkpoint (image + question)."
@@ -155,6 +152,9 @@ class MultimodalChatModel:
         max_new_tokens: int,
         num_beams: int,
     ) -> None:
+        # Lazy import so users see startup logs before heavy HF imports.
+        from models.native_vision_gpt2 import NativeVisionGPT2, load_processors
+
         self.checkpoint_dir = checkpoint_dir
         self.device = device
         self.max_new_tokens = max_new_tokens
