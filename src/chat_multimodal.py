@@ -233,6 +233,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-new-tokens", type=int, default=20)
     parser.add_argument("--num-beams", type=int, default=3)
     parser.add_argument(
+        "--response-mode",
+        type=str,
+        choices=["raw", "assisted"],
+        default="raw",
+        help="`raw` uses only model generation. `assisted` enables local intent routing.",
+    )
+    parser.add_argument(
         "--device",
         choices=["auto", "cuda", "cpu"],
         default="auto",
@@ -339,6 +346,7 @@ class MultimodalChatModel:
         device: torch.device,
         max_new_tokens: int,
         num_beams: int,
+        response_mode: str = "raw",
     ) -> None:
         # Lazy import so users see startup logs before heavy HF imports.
         from models.native_vision_gpt2 import NativeVisionGPT2, load_processors
@@ -347,6 +355,7 @@ class MultimodalChatModel:
         self.device = device
         self.max_new_tokens = max_new_tokens
         self.num_beams = num_beams
+        self.response_mode = response_mode
 
         run_config_path = checkpoint_dir / "run_config.json"
         run_config = {}
@@ -555,6 +564,14 @@ class MultimodalChatModel:
             return "Please upload an image."
 
         question_clean = question.strip() or "What is this image?"
+        if self.response_mode == "raw":
+            prompt = f"Question: {question_clean}\nAnswer:"
+            return self._generate_raw(
+                image=image,
+                prompt=prompt,
+                max_new_tokens=self.max_new_tokens,
+            )
+
         intent = _detect_intent(question_clean)
 
         label, raw_caption = self._predict_label(image=image)
@@ -718,6 +735,7 @@ def main() -> None:
         device=device,
         max_new_tokens=args.max_new_tokens,
         num_beams=args.num_beams,
+        response_mode=args.response_mode,
     )
     print(f"Loaded checkpoint: {chat_model.checkpoint_path}")
 
