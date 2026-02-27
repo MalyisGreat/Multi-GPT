@@ -41,6 +41,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=7860)
+    parser.add_argument(
+        "--port-tries",
+        type=int,
+        default=20,
+        help="If --port is busy, try this many sequential ports before failing.",
+    )
     parser.add_argument("--share", action="store_true")
     parser.add_argument("--max-new-tokens", type=int, default=20)
     parser.add_argument("--num-beams", type=int, default=3)
@@ -243,7 +249,13 @@ class MultimodalChatModel:
         return decoded or "(no output)"
 
 
-def run_ui(chat_model: MultimodalChatModel, host: str, port: int, share: bool) -> None:
+def run_ui(
+    chat_model: MultimodalChatModel,
+    host: str,
+    port: int,
+    share: bool,
+    port_tries: int,
+) -> None:
     try:
         import gradio as gr
     except Exception as exc:
@@ -280,7 +292,24 @@ def run_ui(chat_model: MultimodalChatModel, host: str, port: int, share: bool) -
         )
         clear_btn.click(lambda: [], outputs=[chatbox], inputs=[])
 
-    demo.launch(server_name=host, server_port=port, share=share)
+    attempts = max(1, int(port_tries))
+    launch_error: Optional[Exception] = None
+    for attempt in range(attempts):
+        candidate_port = port + attempt
+        try:
+            if attempt > 0:
+                print(
+                    f"Requested port {port} busy. Retrying on port {candidate_port}..."
+                )
+            demo.launch(server_name=host, server_port=candidate_port, share=share)
+            return
+        except OSError as exc:
+            if "Cannot find empty port in range" not in str(exc):
+                raise
+            launch_error = exc
+
+    if launch_error is not None:
+        raise launch_error
 
 
 def main() -> None:
@@ -313,7 +342,13 @@ def main() -> None:
         print(json.dumps({"question": args.smoke_test_question, "answer": answer}, indent=2))
         return
 
-    run_ui(chat_model, host=args.host, port=args.port, share=args.share)
+    run_ui(
+        chat_model,
+        host=args.host,
+        port=args.port,
+        share=args.share,
+        port_tries=args.port_tries,
+    )
 
 
 if __name__ == "__main__":
