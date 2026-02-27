@@ -19,7 +19,15 @@ Native multimodal GPT-2 training pipeline with:
 
 ## Quick Start (A40-Ready)
 
-Run everything end-to-end:
+Linux:
+
+```bash
+git clone https://github.com/MalyisGreat/Multi-GPT.git
+cd Multi-GPT
+bash ./scripts/full_run_a40.sh
+```
+
+Windows PowerShell:
 
 ```powershell
 cd C:/Users/joshj/Multi-GPT
@@ -35,14 +43,32 @@ This will:
 
 ## Manual Step-by-Step
 
-Setup environment:
+Setup environment (Linux):
+
+```bash
+cd Multi-GPT
+bash ./scripts/bootstrap.sh --python-exe python3 --venv-name .venv --enable-cuda
+```
+
+Setup environment (Windows PowerShell):
 
 ```powershell
 cd C:/Users/joshj/Multi-GPT
 powershell -ExecutionPolicy Bypass -File ./scripts/bootstrap.ps1 -PythonExe "C:/Users/joshj/AppData/Local/Programs/Python/Python312/python.exe" -VenvName ".venv312" -EnableCuda
 ```
 
-Create dataset:
+Create dataset (Linux):
+
+```bash
+./.venv/bin/python src/data/prepare_simple_cifar10_dataset.py \
+  --output-dir data/simple_cifar10_caption \
+  --train-size 8000 \
+  --val-size 1000 \
+  --heldout-size 1000 \
+  --overwrite
+```
+
+Create dataset (Windows PowerShell):
 
 ```powershell
 ./.venv312/Scripts/python.exe src/data/prepare_simple_cifar10_dataset.py `
@@ -53,7 +79,22 @@ Create dataset:
   --overwrite
 ```
 
-Train:
+Train (Linux):
+
+```bash
+./.venv/bin/python src/train_native_caption.py \
+  --train-jsonl data/simple_cifar10_caption/train.jsonl \
+  --val-jsonl data/simple_cifar10_caption/val.jsonl \
+  --heldout-jsonl data/simple_cifar10_caption/heldout.jsonl \
+  --output-dir checkpoints/full-run \
+  --epochs 10 \
+  --batch-size 32 \
+  --gradient-accumulation-steps 2 \
+  --num-workers 8 \
+  --precision fp16
+```
+
+Train (Windows PowerShell):
 
 ```powershell
 ./.venv312/Scripts/python.exe src/train_native_caption.py `
@@ -68,7 +109,15 @@ Train:
   --precision fp16
 ```
 
-Benchmark:
+Benchmark (Linux):
+
+```bash
+./.venv/bin/python src/benchmark_multimodal.py \
+  --checkpoint-dir checkpoints/full-run \
+  --manifest data/simple_cifar10_caption/heldout.jsonl
+```
+
+Benchmark (Windows PowerShell):
 
 ```powershell
 ./.venv312/Scripts/python.exe src/benchmark_multimodal.py `
