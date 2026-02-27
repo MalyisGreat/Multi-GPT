@@ -3,7 +3,7 @@
 __pycache__/
 *.pyc
 
-data/
+/data/
 checkpoints/
 
 .DS_Store
