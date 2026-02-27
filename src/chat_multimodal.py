@@ -5,6 +5,7 @@ import inspect
 import json
 import re
 import tarfile
+from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -265,20 +266,47 @@ def run_ui(
 
     def ask(image_file: Any, question: str, history: Optional[List[Dict[str, Any]]]):
         history = list(history or [])
-        image_path: Optional[str] = None
-        if isinstance(image_file, str):
-            image_path = image_file
-        elif hasattr(image_file, "name"):
-            image_path = str(image_file.name)
+        image: Optional[Image.Image] = None
+        load_error: Optional[str] = None
 
-        if not image_path:
-            answer = "Please upload an image file before asking."
+        if isinstance(image_file, (bytes, bytearray)):
+            if len(image_file) == 0:
+                load_error = "Uploaded file is empty (0 bytes). Re-save the image as PNG/JPG and upload again."
+            else:
+                try:
+                    image = Image.open(BytesIO(image_file)).convert("RGB")
+                except Exception as exc:
+                    load_error = f"Could not decode uploaded image bytes: {exc}"
+        else:
+            image_path: Optional[str] = None
+            if isinstance(image_file, str):
+                image_path = image_file
+            elif hasattr(image_file, "name"):
+                image_path = str(image_file.name)
+
+            if image_path:
+                try:
+                    file_size = Path(image_path).stat().st_size
+                    if file_size == 0:
+                        load_error = (
+                            "Uploaded file is empty (0 bytes). Re-save the image as PNG/JPG and upload again."
+                        )
+                    else:
+                        with Image.open(image_path) as opened:
+                            image = opened.convert("RGB")
+                except Exception as exc:
+                    load_error = f"Could not read image file: {exc}"
+
+        if image is None:
+            answer = load_error or "Please upload an image file before asking."
         else:
             try:
-                with Image.open(image_path) as image:
-                    answer = chat_model.answer(image=image.convert("RGB"), question=question)
+                answer = chat_model.answer(image=image, question=question)
             except Exception as exc:
-                answer = f"Could not read image file: {exc}"
+                answer = f"Inference error: {exc}"
+
+        if image_file is None:
+            answer = "Please upload an image file before asking."
 
         user_text = question.strip() if question and question.strip() else "[Describe image]"
         history.append({"role": "user", "content": user_text})
@@ -288,7 +316,7 @@ def run_ui(
     with gr.Blocks(title="Multimodal GPT-2 Chat") as demo:
         gr.Markdown("## Multimodal GPT-2 Chat\nUpload an image, ask a question, and get a model answer.")
         with gr.Row():
-            image_input = gr.File(label="Image File", file_types=["image"], type="filepath")
+            image_input = gr.File(label="Image File", file_types=["image"], type="binary")
             with gr.Column():
                 question_input = gr.Textbox(label="Question", placeholder="What is in this image?")
                 ask_btn = gr.Button("Ask")
