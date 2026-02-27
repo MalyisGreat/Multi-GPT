@@ -90,7 +90,14 @@ def _load_model_and_processors(
         lm_model_name=lm_model_name,
         vision_model_name=vision_model_name,
     )
-    return model, components.tokenizer, components.image_processor, checkpoint_path
+    tokenizer = components.tokenizer
+    image_processor = components.image_processor
+
+    tokenizer.padding_side = "left"
+    model.lm.config.pad_token_id = tokenizer.pad_token_id
+    model.lm.generation_config.pad_token_id = tokenizer.pad_token_id
+
+    return model, tokenizer, image_processor, checkpoint_path
 
 
 def _generate_captions(
@@ -143,6 +150,7 @@ def _generate_captions(
                 max_new_tokens=max_new_tokens,
                 num_beams=num_beams,
                 do_sample=False,
+                pad_token_id=tokenizer.pad_token_id,
             )
 
         generated_new = generated[:, input_ids.shape[1] :]
@@ -238,7 +246,6 @@ def main() -> None:
         checkpoint_path=checkpoint_path,
         device=device,
     )
-    tokenizer.padding_side = "left"
 
     rows = load_jsonl(manifest_path)
     if args.max_samples and args.max_samples > 0:

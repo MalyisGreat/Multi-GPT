@@ -24,6 +24,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-jsonl", type=str, default="", help="Optional validation JSONL.")
     parser.add_argument("--heldout-jsonl", type=str, default="", help="Optional heldout JSONL.")
     parser.add_argument("--output-dir", type=str, default="checkpoints/native-vision-gpt2")
+    parser.add_argument(
+        "--init-checkpoint",
+        type=str,
+        default="",
+        help="Optional checkpoint path to initialize model weights for continued pretraining.",
+    )
 
     parser.add_argument("--epochs", type=int, default=5)
     parser.add_argument("--batch-size", type=int, default=16)
@@ -192,6 +198,26 @@ def main() -> None:
         unfreeze_top_n_gpt2_blocks=args.unfreeze_top_n_blocks,
     )
     model.to(device)
+
+    if args.init_checkpoint:
+        init_path = Path(args.init_checkpoint).resolve()
+        checkpoint = torch.load(init_path, map_location=device)
+        if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+            init_state = checkpoint["model_state_dict"]
+        elif isinstance(checkpoint, dict):
+            init_state = checkpoint
+        else:
+            raise ValueError(f"Unsupported checkpoint format: {init_path}")
+        missing, unexpected = model.load_state_dict(init_state, strict=False)
+        print(
+            json.dumps(
+                {
+                    "init_checkpoint": str(init_path),
+                    "missing_keys": len(missing),
+                    "unexpected_keys": len(unexpected),
+                }
+            )
+        )
 
     train_dataset = CaptionJsonlDataset(args.train_jsonl)
     val_dataset: Optional[CaptionJsonlDataset] = None

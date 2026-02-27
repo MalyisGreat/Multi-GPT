@@ -12,7 +12,7 @@ Native multimodal GPT-2 training pipeline with:
 
 - `scripts/bootstrap.ps1`: environment setup + dependency install (CUDA-capable option).
 - `scripts/full_run_a40.ps1`: one-command setup/download/train/benchmark pipeline.
-- `src/data/prepare_simple_cifar10_dataset.py`: builds train/val/heldout dataset manifests.
+- `src/data/prepare_simple_cifar10_dataset.py`: builds train/val/heldout manifests from CIFAR-10 or CIFAR-100.
 - `src/train_native_caption.py`: training script with mixed precision + grad accumulation.
 - `src/benchmark_multimodal.py`: benchmark script with BLEU/ROUGE/label-accuracy/swap-sensitivity.
 - `src/models/native_vision_gpt2.py`: multimodal model wrapper.
@@ -123,6 +123,47 @@ Benchmark (Windows PowerShell):
 ./.venv312/Scripts/python.exe src/benchmark_multimodal.py `
   --checkpoint-dir checkpoints/full-run `
   --manifest data/simple_cifar10_caption/heldout.jsonl
+```
+
+## Small Continued Pretrain (Example: Learn "apple")
+
+Create a CIFAR-100 subset dataset that includes `apple`:
+
+```bash
+./.venv/bin/python src/data/prepare_simple_cifar10_dataset.py \
+  --dataset cifar100 \
+  --output-dir data/cifar100_apple_caption \
+  --include-labels apple,orange,pear,sweet_pepper \
+  --train-size 6000 \
+  --val-size 800 \
+  --heldout-size 800 \
+  --overwrite
+```
+
+Continue pretraining from your best checkpoint:
+
+```bash
+./.venv/bin/python src/train_native_caption.py \
+  --train-jsonl data/cifar100_apple_caption/train.jsonl \
+  --val-jsonl data/cifar100_apple_caption/val.jsonl \
+  --heldout-jsonl data/cifar100_apple_caption/heldout.jsonl \
+  --init-checkpoint checkpoints/full-run/epoch-2.pt \
+  --output-dir checkpoints/continued-apple \
+  --epochs 3 \
+  --batch-size 32 \
+  --gradient-accumulation-steps 2 \
+  --num-workers 8 \
+  --precision fp16 \
+  --unfreeze-top-n-blocks 2
+```
+
+Benchmark the continued-pretrained checkpoint:
+
+```bash
+./.venv/bin/python src/benchmark_multimodal.py \
+  --checkpoint-dir checkpoints/continued-apple \
+  --checkpoint-path checkpoints/continued-apple/epoch-3.pt \
+  --manifest data/cifar100_apple_caption/heldout.jsonl
 ```
 
 ## Benchmark Output

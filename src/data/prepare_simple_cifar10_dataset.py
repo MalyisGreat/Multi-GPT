@@ -5,9 +5,9 @@ import json
 import random
 import shutil
 from pathlib import Path
-from typing import Iterable, List, Sequence
+from typing import Iterable, List, Optional, Sequence
 
-from torchvision.datasets import CIFAR10
+from torchvision.datasets import CIFAR10, CIFAR100
 
 
 TRAIN_TEMPLATES = [
@@ -22,7 +22,14 @@ EVAL_TEMPLATE = "a photo of a {label}."
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Create a simple image-caption dataset from CIFAR-10 with train/val/heldout splits."
+        description="Create a simple image-caption dataset from CIFAR-10/100 with train/val/heldout splits."
+    )
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        choices=["cifar10", "cifar100"],
+        default="cifar10",
+        help="Source dataset to build captions from.",
     )
     parser.add_argument(
         "--output-dir",
@@ -34,7 +41,13 @@ def parse_args() -> argparse.Namespace:
         "--download-dir",
         type=str,
         default="data/raw",
-        help="Directory used by torchvision to download/store CIFAR-10.",
+        help="Directory used by torchvision to download/store CIFAR datasets.",
+    )
+    parser.add_argument(
+        "--include-labels",
+        type=str,
+        default="",
+        help="Optional comma-separated class names to keep (for example: apple,orange,pear).",
     )
     parser.add_argument("--train-size", type=int, default=8000)
     parser.add_argument("--val-size", type=int, default=1000)
@@ -48,10 +61,10 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _sample_indices(population_size: int, sample_size: int, rng: random.Random) -> List[int]:
-    if sample_size > population_size:
-        raise ValueError(f"sample_size={sample_size} > population_size={population_size}")
-    indices = list(range(population_size))
+def _sample_indices(candidates: Sequence[int], sample_size: int, rng: random.Random) -> List[int]:
+    if sample_size > len(candidates):
+        raise ValueError(f"sample_size={sample_size} > available_candidates={len(candidates)}")
+    indices = list(candidates)
     rng.shuffle(indices)
     return indices[:sample_size]
 
@@ -65,7 +78,7 @@ def _caption_for_label(label_name: str, idx: int, split: str) -> str:
 
 def _write_split(
     split: str,
-    dataset: CIFAR10,
+    dataset: CIFAR10 | CIFAR100,
     indices: Sequence[int],
     root: Path,
 ) -> Path:
@@ -95,20 +108,24 @@ def _write_split(
 
 def _summarize(
     output_dir: Path,
+    dataset_name: str,
     class_names: Iterable[str],
     train_size: int,
     val_size: int,
     heldout_size: int,
     seed: int,
+    included_labels: Optional[Sequence[str]],
 ) -> None:
     summary = {
-        "name": "simple_cifar10_caption",
+        "name": f"simple_{dataset_name}_caption",
+        "dataset": dataset_name,
         "seed": seed,
         "splits": {"train": train_size, "val": val_size, "heldout": heldout_size},
         "class_names": list(class_names),
+        "included_labels": list(included_labels) if included_labels else [],
         "notes": [
-            "Train/val come from CIFAR-10 train set.",
-            "Heldout comes from CIFAR-10 test set and should not be used for training.",
+            "Train/val come from dataset train split.",
+            "Heldout comes from dataset test split and should not be used for training.",
             "Captions are intentionally simple class descriptions.",
         ],
     }
@@ -133,14 +150,31 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     download_dir.mkdir(parents=True, exist_ok=True)
 
-    train_dataset = CIFAR10(root=str(download_dir), train=True, download=True)
-    test_dataset = CIFAR10(root=str(download_dir), train=False, download=True)
+    dataset_cls = CIFAR10 if args.dataset == "cifar10" else CIFAR100
+    train_dataset = dataset_cls(root=str(download_dir), train=True, download=True)
+    test_dataset = dataset_cls(root=str(download_dir), train=False, download=True)
+
+    included_labels: Optional[List[str]] = None
+    if args.include_labels.strip():
+        included_labels = [x.strip() for x in args.include_labels.split(",") if x.strip()]
+        unknown = [x for x in included_labels if x not in train_dataset.class_to_idx]
+        if unknown:
+            raise ValueError(
+                f"Unknown labels for {args.dataset}: {unknown}. "
+                f"Available labels include: {train_dataset.classes[:20]}"
+            )
+        allowed_ids = {train_dataset.class_to_idx[x] for x in included_labels}
+        train_candidates = [i for i, y in enumerate(train_dataset.targets) if y in allowed_ids]
+        test_candidates = [i for i, y in enumerate(test_dataset.targets) if y in allowed_ids]
+    else:
+        train_candidates = list(range(len(train_dataset)))
+        test_candidates = list(range(len(test_dataset)))
 
     train_total_needed = args.train_size + args.val_size
-    train_pool = _sample_indices(len(train_dataset), train_total_needed, rng)
+    train_pool = _sample_indices(train_candidates, train_total_needed, rng)
     train_indices = train_pool[: args.train_size]
     val_indices = train_pool[args.train_size :]
-    heldout_indices = _sample_indices(len(test_dataset), args.heldout_size, rng)
+    heldout_indices = _sample_indices(test_candidates, args.heldout_size, rng)
 
     train_manifest = _write_split("train", train_dataset, train_indices, output_dir)
     val_manifest = _write_split("val", train_dataset, val_indices, output_dir)
@@ -148,11 +182,13 @@ def main() -> None:
 
     _summarize(
         output_dir=output_dir,
-        class_names=train_dataset.classes,
+        dataset_name=args.dataset,
+        class_names=included_labels if included_labels else train_dataset.classes,
         train_size=len(train_indices),
         val_size=len(val_indices),
         heldout_size=len(heldout_indices),
         seed=args.seed,
+        included_labels=included_labels,
     )
 
     print("Dataset setup complete.")
