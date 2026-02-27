@@ -46,6 +46,12 @@ def parse_args() -> argparse.Namespace:
 
     parser.add_argument("--vision-model-name", type=str, default="openai/clip-vit-base-patch32")
     parser.add_argument("--lm-model-name", type=str, default="gpt2")
+    parser.add_argument(
+        "--fusion-mode",
+        choices=["cross_attn", "unified"],
+        default="cross_attn",
+        help="Multimodal fusion mode: cross-attention or shared token stream.",
+    )
     parser.add_argument("--unfreeze-top-n-blocks", type=int, default=0)
     parser.add_argument("--no-freeze-vision", action="store_true")
     parser.add_argument("--no-freeze-lm-backbone", action="store_true")
@@ -194,6 +200,7 @@ def main() -> None:
     model = NativeVisionGPT2(
         vision_model_name=args.vision_model_name,
         lm_model_name=args.lm_model_name,
+        fusion_mode=args.fusion_mode,
         freeze_vision=not args.no_freeze_vision,
         freeze_lm_backbone=not args.no_freeze_lm_backbone,
         unfreeze_top_n_gpt2_blocks=args.unfreeze_top_n_blocks,

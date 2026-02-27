@@ -66,11 +66,13 @@ def _load_model_and_processors(
 
     vision_model_name = run_config.get("vision_model_name", "openai/clip-vit-base-patch32")
     lm_model_name = run_config.get("lm_model_name", "gpt2")
+    fusion_mode = run_config.get("fusion_mode", "cross_attn")
     unfreeze_top_n = int(run_config.get("unfreeze_top_n_blocks", 0))
 
     model = NativeVisionGPT2(
         vision_model_name=vision_model_name,
         lm_model_name=lm_model_name,
+        fusion_mode=fusion_mode,
         freeze_vision=not bool(run_config.get("no_freeze_vision", False)),
         freeze_lm_backbone=not bool(run_config.get("no_freeze_lm_backbone", False)),
         unfreeze_top_n_gpt2_blocks=unfreeze_top_n,

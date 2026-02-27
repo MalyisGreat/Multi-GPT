@@ -180,6 +180,26 @@ Benchmark the continued-pretrained checkpoint:
   --manifest data/cifar100_apple_caption/heldout.jsonl
 ```
 
+## Shared Token Stream (Unified Mode)
+
+To use a single shared visual+text token stream instead of cross-attention:
+
+```bash
+./.venv/bin/python src/train_native_caption.py \
+  --train-jsonl data/cifar100_full_caption/train.jsonl \
+  --val-jsonl data/cifar100_full_caption/val.jsonl \
+  --heldout-jsonl data/cifar100_full_caption/heldout.jsonl \
+  --init-checkpoint checkpoints/full-run/epoch-2.pt \
+  --output-dir checkpoints/unified-cifar100 \
+  --fusion-mode unified \
+  --epochs 2 \
+  --batch-size 32 \
+  --gradient-accumulation-steps 2 \
+  --num-workers 8 \
+  --precision fp16 \
+  --unfreeze-top-n-blocks 2
+```
+
 ## Benchmark Output
 
 Generated files in checkpoint directory:
