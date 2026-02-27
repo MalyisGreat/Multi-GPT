@@ -50,6 +50,25 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Optional comma-separated class names to keep (for example: apple,orange,pear).",
     )
+    parser.add_argument(
+        "--image-format",
+        type=str,
+        choices=["png", "jpg"],
+        default="png",
+        help="Export image format. jpg is often faster; png with compress-level 0 is also fast.",
+    )
+    parser.add_argument(
+        "--png-compress-level",
+        type=int,
+        default=0,
+        help="PNG compression level 0..9 (0 is fastest, larger files).",
+    )
+    parser.add_argument(
+        "--jpeg-quality",
+        type=int,
+        default=90,
+        help="JPEG quality 1..95 (lower can be faster/smaller).",
+    )
     parser.add_argument("--train-size", type=int, default=8000)
     parser.add_argument("--val-size", type=int, default=1000)
     parser.add_argument("--heldout-size", type=int, default=1000)
@@ -82,6 +101,9 @@ def _write_split(
     dataset: CIFAR10 | CIFAR100,
     indices: Sequence[int],
     root: Path,
+    image_format: str,
+    png_compress_level: int,
+    jpeg_quality: int,
 ) -> Path:
     image_dir = root / "images" / split
     image_dir.mkdir(parents=True, exist_ok=True)
@@ -94,8 +116,22 @@ def _write_split(
             label_name = dataset.classes[label_id]
             caption = _caption_for_label(label_name, idx=row_num, split=split)
 
-            image_path = image_dir / f"{split}_{idx:05d}.png"
-            image.save(image_path)
+            if image_format == "jpg":
+                image_path = image_dir / f"{split}_{idx:05d}.jpg"
+                image.save(
+                    image_path,
+                    format="JPEG",
+                    quality=jpeg_quality,
+                    optimize=False,
+                )
+            else:
+                image_path = image_dir / f"{split}_{idx:05d}.png"
+                image.save(
+                    image_path,
+                    format="PNG",
+                    compress_level=png_compress_level,
+                    optimize=False,
+                )
 
             record = {
                 "image_path": str(image_path.resolve()),
@@ -138,6 +174,10 @@ def _summarize(
 def main() -> None:
     args = parse_args()
     rng = random.Random(args.seed)
+    if not 0 <= args.png_compress_level <= 9:
+        raise ValueError("--png-compress-level must be between 0 and 9.")
+    if not 1 <= args.jpeg_quality <= 95:
+        raise ValueError("--jpeg-quality must be between 1 and 95.")
 
     output_dir = Path(args.output_dir).resolve()
     download_dir = Path(args.download_dir).resolve()
@@ -179,11 +219,35 @@ def main() -> None:
     heldout_indices = _sample_indices(test_candidates, args.heldout_size, rng)
 
     print(f"Preparing split: train ({len(train_indices)} samples)")
-    train_manifest = _write_split("train", train_dataset, train_indices, output_dir)
+    train_manifest = _write_split(
+        "train",
+        train_dataset,
+        train_indices,
+        output_dir,
+        args.image_format,
+        args.png_compress_level,
+        args.jpeg_quality,
+    )
     print(f"Preparing split: val ({len(val_indices)} samples)")
-    val_manifest = _write_split("val", train_dataset, val_indices, output_dir)
+    val_manifest = _write_split(
+        "val",
+        train_dataset,
+        val_indices,
+        output_dir,
+        args.image_format,
+        args.png_compress_level,
+        args.jpeg_quality,
+    )
     print(f"Preparing split: heldout ({len(heldout_indices)} samples)")
-    heldout_manifest = _write_split("heldout", test_dataset, heldout_indices, output_dir)
+    heldout_manifest = _write_split(
+        "heldout",
+        test_dataset,
+        heldout_indices,
+        output_dir,
+        args.image_format,
+        args.png_compress_level,
+        args.jpeg_quality,
+    )
 
     _summarize(
         output_dir=output_dir,

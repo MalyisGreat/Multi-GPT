@@ -68,6 +68,20 @@ Create dataset (Linux):
   --overwrite
 ```
 
+Faster export for large runs:
+
+```bash
+./.venv/bin/python src/data/prepare_simple_cifar10_dataset.py \
+  --dataset cifar100 \
+  --output-dir data/cifar100_full_caption \
+  --train-size 45000 \
+  --val-size 5000 \
+  --heldout-size 10000 \
+  --image-format jpg \
+  --jpeg-quality 85 \
+  --overwrite
+```
+
 Create dataset (Windows PowerShell):
 
 ```powershell
