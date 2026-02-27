@@ -106,6 +106,17 @@ def _generate_captions(
     model.eval()
     predictions: List[str] = []
 
+    # Avoid using EOS as the initial token when EOS is also the pad token for GPT-2,
+    # which can trigger repeated decoder right-padding warnings during generation.
+    seed_ids = tokenizer.encode("a", add_special_tokens=False)
+    start_token_id = seed_ids[0] if seed_ids else tokenizer.eos_token_id
+    if tokenizer.pad_token_id is not None and start_token_id == tokenizer.pad_token_id:
+        alt_ids = tokenizer.encode(".", add_special_tokens=False)
+        if alt_ids:
+            start_token_id = alt_ids[0]
+        else:
+            start_token_id = tokenizer.eos_token_id
+
     for start in range(0, len(rows), batch_size):
         batch_rows = rows[start : start + batch_size]
         images = []
@@ -118,7 +129,7 @@ def _generate_captions(
 
         input_ids = torch.full(
             (len(batch_rows), 1),
-            fill_value=tokenizer.eos_token_id,
+            fill_value=start_token_id,
             dtype=torch.long,
             device=device,
         )
