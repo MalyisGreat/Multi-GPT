@@ -6,7 +6,7 @@ import json
 import re
 import tarfile
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import torch
 from PIL import Image
@@ -263,11 +263,12 @@ def run_ui(
             "Gradio is required for UI mode. Install with: pip install gradio"
         ) from exc
 
-    def ask(image: Image.Image, question: str, history: List[Tuple[str, str]]):
-        history = history or []
+    def ask(image: Image.Image, question: str, history: Optional[List[Dict[str, Any]]]):
+        history = list(history or [])
         answer = chat_model.answer(image=image, question=question)
         user_text = question.strip() if question and question.strip() else "[Describe image]"
-        history.append((user_text, answer))
+        history.append({"role": "user", "content": user_text})
+        history.append({"role": "assistant", "content": answer})
         return history, ""
 
     with gr.Blocks(title="Multimodal GPT-2 Chat") as demo:
