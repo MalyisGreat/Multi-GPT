@@ -10,6 +10,7 @@ import evaluate
 import sacrebleu
 import torch
 from PIL import Image
+from tqdm import tqdm
 
 from models.native_vision_gpt2 import NativeVisionGPT2, load_processors
 
@@ -109,6 +110,7 @@ def _generate_captions(
     max_new_tokens: int,
     num_beams: int,
     device: torch.device,
+    progress_desc: str = "Generate captions",
 ) -> List[str]:
     model.eval()
     predictions: List[str] = []
@@ -124,7 +126,8 @@ def _generate_captions(
         else:
             start_token_id = tokenizer.eos_token_id
 
-    for start in range(0, len(rows), batch_size):
+    batch_starts = range(0, len(rows), batch_size)
+    for start in tqdm(batch_starts, desc=progress_desc, leave=False):
         batch_rows = rows[start : start + batch_size]
         images = []
         for row in batch_rows:
@@ -214,6 +217,7 @@ def _image_swap_sensitivity(
         max_new_tokens=max_new_tokens,
         num_beams=num_beams,
         device=device,
+        progress_desc="Swap sensitivity (base)",
     )
     swap_preds = _generate_captions(
         model=model,
@@ -224,6 +228,7 @@ def _image_swap_sensitivity(
         max_new_tokens=max_new_tokens,
         num_beams=num_beams,
         device=device,
+        progress_desc="Swap sensitivity (swapped)",
     )
 
     changed = 0
@@ -260,6 +265,7 @@ def main() -> None:
         max_new_tokens=args.max_new_tokens,
         num_beams=args.num_beams,
         device=device,
+        progress_desc="Benchmark generation",
     )
 
     references = [r["caption"] for r in rows]

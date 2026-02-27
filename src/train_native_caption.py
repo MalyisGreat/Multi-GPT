@@ -149,12 +149,13 @@ def evaluate(
     dataloader: DataLoader,
     device: torch.device,
     precision: str,
+    desc: str = "Eval",
 ) -> float:
     model.eval()
     total_loss = 0.0
     total_steps = 0
 
-    for batch in dataloader:
+    for batch in tqdm(dataloader, desc=desc, leave=False):
         batch = {k: v.to(device, non_blocking=True) for k, v in batch.items()}
         with _autocast_context(device, precision):
             outputs = model(
@@ -324,10 +325,10 @@ def main() -> None:
         metrics = {"epoch": epoch, "train_loss": epoch_train_loss}
 
         if val_loader is not None:
-            val_loss = evaluate(model, val_loader, device, args.precision)
+            val_loss = evaluate(model, val_loader, device, args.precision, desc="Validation")
             metrics["val_loss"] = val_loss
         if heldout_loader is not None and args.eval_heldout_each_epoch:
-            heldout_loss = evaluate(model, heldout_loader, device, args.precision)
+            heldout_loss = evaluate(model, heldout_loader, device, args.precision, desc="Heldout")
             metrics["heldout_loss"] = heldout_loss
 
         print(json.dumps(metrics))
@@ -354,7 +355,7 @@ def main() -> None:
     )
 
     if heldout_loader is not None:
-        final_heldout_loss = evaluate(model, heldout_loader, device, args.precision)
+        final_heldout_loss = evaluate(model, heldout_loader, device, args.precision, desc="Final heldout")
         print(json.dumps({"final_heldout_loss": final_heldout_loss}))
 
     print(f"Training complete. Artifacts saved to {output_dir}.")

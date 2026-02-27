@@ -7,6 +7,7 @@ import shutil
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence
 
+from tqdm import tqdm
 from torchvision.datasets import CIFAR10, CIFAR100
 
 
@@ -87,7 +88,8 @@ def _write_split(
 
     manifest_path = root / f"{split}.jsonl"
     with manifest_path.open("w", encoding="utf-8") as manifest_file:
-        for row_num, idx in enumerate(indices):
+        iterator = tqdm(indices, total=len(indices), desc=f"Writing {split}", unit="img")
+        for row_num, idx in enumerate(iterator):
             image, label_id = dataset[idx]
             label_name = dataset.classes[label_id]
             caption = _caption_for_label(label_name, idx=row_num, split=split)
@@ -176,8 +178,11 @@ def main() -> None:
     val_indices = train_pool[args.train_size :]
     heldout_indices = _sample_indices(test_candidates, args.heldout_size, rng)
 
+    print(f"Preparing split: train ({len(train_indices)} samples)")
     train_manifest = _write_split("train", train_dataset, train_indices, output_dir)
+    print(f"Preparing split: val ({len(val_indices)} samples)")
     val_manifest = _write_split("val", train_dataset, val_indices, output_dir)
+    print(f"Preparing split: heldout ({len(heldout_indices)} samples)")
     heldout_manifest = _write_split("heldout", test_dataset, heldout_indices, output_dir)
 
     _summarize(
