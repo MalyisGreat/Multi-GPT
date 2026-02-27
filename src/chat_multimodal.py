@@ -263,9 +263,23 @@ def run_ui(
             "Gradio is required for UI mode. Install with: pip install gradio"
         ) from exc
 
-    def ask(image: Image.Image, question: str, history: Optional[List[Dict[str, Any]]]):
+    def ask(image_file: Any, question: str, history: Optional[List[Dict[str, Any]]]):
         history = list(history or [])
-        answer = chat_model.answer(image=image, question=question)
+        image_path: Optional[str] = None
+        if isinstance(image_file, str):
+            image_path = image_file
+        elif hasattr(image_file, "name"):
+            image_path = str(image_file.name)
+
+        if not image_path:
+            answer = "Please upload an image file before asking."
+        else:
+            try:
+                with Image.open(image_path) as image:
+                    answer = chat_model.answer(image=image.convert("RGB"), question=question)
+            except Exception as exc:
+                answer = f"Could not read image file: {exc}"
+
         user_text = question.strip() if question and question.strip() else "[Describe image]"
         history.append({"role": "user", "content": user_text})
         history.append({"role": "assistant", "content": answer})
@@ -274,7 +288,7 @@ def run_ui(
     with gr.Blocks(title="Multimodal GPT-2 Chat") as demo:
         gr.Markdown("## Multimodal GPT-2 Chat\nUpload an image, ask a question, and get a model answer.")
         with gr.Row():
-            image_input = gr.Image(type="pil", label="Image")
+            image_input = gr.File(label="Image File", file_types=["image"], type="filepath")
             with gr.Column():
                 question_input = gr.Textbox(label="Question", placeholder="What is in this image?")
                 ask_btn = gr.Button("Ask")
